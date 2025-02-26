@@ -1,0 +1,102 @@
+name: build-test-deploy
+
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+      - name: use node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+      - run: npm install
+      - run: npm run build
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+      - name: use node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+      - run: npm install
+      - run: npm test
+
+  deploy-dev:
+    needs: test
+    if: github.ref == 'refs/heads/Development'
+
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    environment:
+      name: Development
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: use node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+      - name: configure github pages
+        uses: actions/configure-pages@v4
+        with:
+          static_site_generator: next
+      - run: npm install
+      - run: npm run build
+      - name: upload artifacts
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './build/'
+      - name: deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  git-push:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: configure git safe directory
+        run: git config --global --add safe.directory /github/workspace
+      - name: clone destination repo
+        run: git clone https://joaolucasmm:${{ secrets.PROD_TOKEN }}@github.com/joaolucasmm/portfolio.git /tmp/portfolio
+      - name: copy files
+        run: |
+          rsync -av --exclude='.git' ./ /tmp/portfolio/
+          cd /tmp/portfolio
+          git config --global user.email "joaol_mm@hotmail.com"
+          git config --global user.name "joaolucasmm"
+          git add .
+          git commit -m "Update from CI"
+      - name: push to another repository
+        run: |
+          cd /tmp/portfolio
+          git push origin main
