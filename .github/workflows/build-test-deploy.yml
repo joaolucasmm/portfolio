@@ -1,77 +1,73 @@
 name: build-test-deploy
 
-on: push
+# Production's own workflow. The code arrives from joaolucasmm/portfolio-dev (its
+# git-push job copies everything except this folder), already linted and tested
+# there; here it is tested once more and published to GitHub Pages.
+on:
+  push:
+    branches: [main]
+  # Run by hand from the Actions tab, e.g. to publish again without a commit.
+  workflow_dispatch:
+
+# A newer push cancels the run still going, so two deploys never race.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: checkout repo
-        uses: actions/checkout@v4
-      - name: use node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20.x'
-      - run: npm install
-        env:
-            REACT_APP_SERVICE_ID: ${{ secrets.REACT_APP_SERVICE_ID }}
-            REACT_APP_TEMPLATE_ID: ${{ secrets.REACT_APP_TEMPLATE_ID }}
-            REACT_APP_PUBLIC_KEY: ${{ secrets.REACT_APP_PUBLIC_KEY }}
-      - run: npm run build
-
   test:
-    needs: build
     runs-on: ubuntu-latest
-    
     steps:
       - name: checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: use node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20.x'
-      - run: npm install
+          cache: npm
+      - run: npm ci
       - run: npm test
 
   deploy-prod:
     needs: test
-    if: github.ref == 'refs/heads/main'
 
     permissions:
-      contents: write
+      contents: read
       pages: write
       id-token: write
 
     environment:
       name: Production
       url: ${{ steps.deployment.outputs.page_url }}
-    
+
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: checkout repo
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        uses: actions/checkout@v7
       - name: use node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20.x'
+          cache: npm
       - name: configure github pages
-        uses: actions/configure-pages@v4
-        with:
-          static_site_generator: next
-      - run: npm install
+        uses: actions/configure-pages@v6
+      - run: npm ci
+      # vite.config.mts takes the /portfolio/ path from the repository name.
       - run: npm run build
         env:
-            REACT_APP_SERVICE_ID: ${{ secrets.REACT_APP_SERVICE_ID }}
-            REACT_APP_TEMPLATE_ID: ${{ secrets.REACT_APP_TEMPLATE_ID }}
-            REACT_APP_PUBLIC_KEY: ${{ secrets.REACT_APP_PUBLIC_KEY }}
+          REACT_APP_SERVICE_ID: ${{ secrets.REACT_APP_SERVICE_ID }}
+          REACT_APP_TEMPLATE_ID: ${{ secrets.REACT_APP_TEMPLATE_ID }}
+          REACT_APP_PUBLIC_KEY: ${{ secrets.REACT_APP_PUBLIC_KEY }}
       - name: upload artifacts
         uses: actions/upload-pages-artifact@v3
         with:
           path: './build/'
+          # One name per attempt: re-running the job keeps the earlier attempt's
+          # artifact in the run, and deploy-pages refuses when two share a name.
+          name: github-pages-${{ github.run_attempt }}
       - name: deploy
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
